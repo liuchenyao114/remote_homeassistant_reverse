@@ -246,6 +246,7 @@ class PushHub:
         vol.Required(CONF_SECRET): cv.string,
     }
 )
+@websocket_api.async_response
 async def ws_register(
     hass: HomeAssistant, connection: Any, msg: dict[str, Any]
 ) -> None:
@@ -270,6 +271,7 @@ async def ws_register(
 @websocket_api.websocket_command(
     {vol.Required("type"): WS_STATES, vol.Required("states"): list}
 )
+@websocket_api.async_response
 async def ws_states(
     hass: HomeAssistant, connection: Any, msg: dict[str, Any]
 ) -> None:
@@ -294,6 +296,7 @@ async def ws_states(
         vol.Optional("attributes", default={}): dict,
     }
 )
+@websocket_api.async_response
 async def ws_state_changed(
     hass: HomeAssistant, connection: Any, msg: dict[str, Any]
 ) -> None:
@@ -316,6 +319,7 @@ async def ws_state_changed(
 @websocket_api.websocket_command(
     {vol.Required("type"): WS_REMOVE, vol.Required("entity_id"): cv.string}
 )
+@websocket_api.async_response
 async def ws_remove(
     hass: HomeAssistant, connection: Any, msg: dict[str, Any]
 ) -> None:
@@ -332,9 +336,11 @@ async def ws_remove(
     {
         vol.Required("type"): WS_SERVICE_RESULT,
         vol.Required("ok"): bool,
+        vol.Optional("request_id"): vol.Any(int, None),
         vol.Optional("error"): cv.string,
     }
 )
+@websocket_api.async_response
 async def ws_service_result(
     hass: HomeAssistant, connection: Any, msg: dict[str, Any]
 ) -> None:
@@ -347,7 +353,7 @@ async def ws_service_result(
         EVENT_SERVICE_RESULT,
         {
             "agent_id": agent_id,
-            "request_id": msg.get("id"),
+            "request_id": msg.get("request_id"),
             "ok": msg["ok"],
             "error": msg.get("error"),
         },
