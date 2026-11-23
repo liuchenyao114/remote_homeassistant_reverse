@@ -52,27 +52,59 @@ def _hub(hass: HomeAssistant) -> "PushHub | None":
 class PushHub:
     """Keep mirrored entities for one or more remote agents."""
 
-    def __init__(self, hass: HomeAssistant, agents_conf: list[dict[str, Any]]) -> None:
+    def __init__(
+        self, hass: HomeAssistant, agents_conf: list[dict[str, Any]] | None = None
+    ) -> None:
         self.hass = hass
         self.agents: dict[str, dict[str, Any]] = {}
         self.connections: dict[str, Any] = {}
         self.entity_map: dict[str, str] = {}
         self._ids = itertools.count(1)
         self._unsub_bus: Any = None
+        self._started = False
 
-        for conf in agents_conf:
-            agent_id = str(conf[CONF_AGENT_ID]).lower()
-            self.agents[agent_id] = {
-                "secret": conf[CONF_SECRET],
-                "prefix": conf.get(CONF_PREFIX) or f"{agent_id}_",
-                "include_domains": set(conf.get(CONF_INCLUDE_DOMAINS, [])),
-                "exclude_domains": set(conf.get(CONF_EXCLUDE_DOMAINS, [])),
-                "include_entities": {e.lower() for e in conf.get(CONF_INCLUDE_ENTITIES, [])},
-                "exclude_entities": {e.lower() for e in conf.get(CONF_EXCLUDE_ENTITIES, [])},
-            }
+        for conf in agents_conf or []:
+            self.add_agent(conf)
+
+    def add_agent(self, conf: dict[str, Any]) -> dict[str, Any]:
+        """Register or update one agent, both from YAML and config entries."""
+        agent_id = str(conf[CONF_AGENT_ID]).lower()
+        entry = {
+            "secret": conf[CONF_SECRET],
+            "prefix": conf.get(CONF_PREFIX) or f"{agent_id}_",
+            "include_domains": set(conf.get(CONF_INCLUDE_DOMAINS) or []),
+            "exclude_domains": set(conf.get(CONF_EXCLUDE_DOMAINS) or []),
+            "include_entities": {
+                str(e).lower() for e in conf.get(CONF_INCLUDE_ENTITIES) or []
+            },
+            "exclude_entities": {
+                str(e).lower() for e in conf.get(CONF_EXCLUDE_ENTITIES) or []
+            },
+        }
+        self.agents[agent_id] = entry
+        return entry
+
+    async def async_remove_agent(self, agent_id: str) -> None:
+        """Forget an agent and drop its mirrored states."""
+        agent_id = str(agent_id).lower()
+        self.agents.pop(agent_id, None)
+        connection = self.connections.pop(agent_id, None)
+        for entity_id, owner in list(self.entity_map.items()):
+            if owner == agent_id:
+                self.hass.states.async_remove(entity_id)
+                self.entity_map.pop(entity_id, None)
+        if connection is not None:
+            _LOGGER.info("agent %s removed, connection kept until it drops", agent_id)
+        _LOGGER.info("agent %s removed, mirrored states cleared", agent_id)
+
+    @property
+    def started(self) -> bool:
+        return self._started
 
     async def async_start(self) -> None:
         """Register websocket commands, services and event listener."""
+        if self._started:
+            return
         for command in (
             ws_register,
             ws_states,
@@ -91,13 +123,20 @@ class PushHub:
             self.async_call_service,
             schema=CALL_SERVICE_SCHEMA,
         )
+        self._started = True
         _LOGGER.info("remote_push hub started, agents: %s", list(self.agents))
 
     async def async_stop(self) -> None:
+        if not self._started:
+            return
         if self._unsub_bus is not None:
             self._unsub_bus()
             self._unsub_bus = None
         self.hass.services.async_remove(DOMAIN, SERVICE_CALL_SERVICE)
+        for agent_id in list(self.connections):
+            self.detach_connection(self.connections[agent_id])
+        self._started = False
+        _LOGGER.info("remote_push hub stopped")
 
     def attach(self, agent_id: str, connection: Any) -> None:
         """Attach an agent connection, dropping the previous one if any."""

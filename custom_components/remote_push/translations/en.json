@@ -1,0 +1,101 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Remote Push",
+        "description": "Pick the role of this Home Assistant instance. The hub runs on the instance that is reachable from the internet; the agent runs on the instance without a public IP and connects out to the hub.",
+        "menu_options": {
+          "hub": "Hub - public instance (add a remote agent)",
+          "agent": "Agent - no public IP (connect to the hub)"
+        }
+      },
+      "hub": {
+        "title": "Add a remote agent",
+        "description": "Register an agent that will connect to this instance. The agent must use the same agent ID and shared secret.",
+        "data": {
+          "agent_id": "Agent ID",
+          "secret": "Shared secret",
+          "prefix": "Entity prefix",
+          "include_domains": "Only these domains",
+          "exclude_domains": "Skip these domains",
+          "include_entities": "Only these entities",
+          "exclude_entities": "Skip these entities"
+        },
+        "data_description": {
+          "agent_id": "Short lowercase name, e.g. b. Mirrored entities become <prefix><entity_id>.",
+          "secret": "Any password you choose. It is not the Home Assistant token; both sides must match.",
+          "prefix": "Prefix added to every mirrored entity id. Defaults to <agent_id>_.",
+          "include_domains": "Comma separated, e.g. sensor, light. Empty means all domains.",
+          "exclude_domains": "Comma separated.",
+          "include_entities": "If set, only these entities are mirrored.",
+          "exclude_entities": "Always skipped."
+        }
+      },
+      "agent": {
+        "title": "Connect to the hub",
+        "description": "This instance will open an outbound WebSocket to the hub. No port forwarding is needed here. Use a long-lived access token created on the hub.",
+        "data": {
+          "agent_id": "Agent ID",
+          "secret": "Shared secret",
+          "host": "Hub host",
+          "port": "Hub port",
+          "secure": "Use wss (TLS)",
+          "verify_ssl": "Verify TLS certificate",
+          "token": "Hub access token",
+          "include_domains": "Only these domains",
+          "exclude_domains": "Skip these domains",
+          "include_entities": "Only these entities",
+          "exclude_entities": "Skip these entities"
+        },
+        "data_description": {
+          "agent_id": "Must match the agent ID registered on the hub.",
+          "secret": "Must match the shared secret registered on the hub.",
+          "host": "Domain name or IP of the hub.",
+          "port": "8123 for a plain Home Assistant, 443 behind a reverse proxy.",
+          "secure": "Turn on when the hub is served over HTTPS.",
+          "verify_ssl": "Turn off only for self-signed certificates while testing.",
+          "token": "Long-lived access token of a user on the hub.",
+          "include_domains": "Comma separated, e.g. sensor, light. Empty means all domains.",
+          "exclude_domains": "Comma separated.",
+          "include_entities": "If set, only these entities are pushed.",
+          "exclude_entities": "Always skipped."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the hub. Check host, port, TLS settings and that Home Assistant is running there.",
+      "invalid_auth": "The hub rejected the access token.",
+      "invalid_input": "Fill in all required fields.",
+      "unknown": "Unexpected error, see the Home Assistant log."
+    },
+    "abort": {
+      "already_configured": "This agent ID is already registered on the hub.",
+      "single_instance_allowed": "An agent entry already exists. Only one is allowed per instance."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Remote Push options",
+        "description": "Entry: {role} {agent_id}",
+        "data": {
+          "secret": "Shared secret",
+          "prefix": "Entity prefix",
+          "host": "Hub host",
+          "port": "Hub port",
+          "secure": "Use wss (TLS)",
+          "verify_ssl": "Verify TLS certificate",
+          "token": "Hub access token",
+          "include_domains": "Only these domains",
+          "exclude_domains": "Skip these domains",
+          "include_entities": "Only these entities",
+          "exclude_entities": "Skip these entities"
+        },
+        "data_description": {
+          "prefix": "Changing the prefix re-creates every mirrored entity id.",
+          "token": "Long-lived access token of a user on the hub."
+        }
+      }
+    }
+  }
+}

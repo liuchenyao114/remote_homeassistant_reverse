@@ -1,0 +1,101 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Remote Push",
+        "description": "选择这台 Home Assistant 的角色。Hub 跑在有公网、能被访问到的那台；Agent 跑在没有公网 IP 的那台，由它主动外连 Hub。",
+        "menu_options": {
+          "hub": "Hub — 公网实例（登记一个远端 agent）",
+          "agent": "Agent — 无公网（主动连接 hub）"
+        }
+      },
+      "hub": {
+        "title": "登记远端 agent",
+        "description": "登记一个会连到本机的 agent。对端的 agent ID 与共享密钥必须与这里一致。",
+        "data": {
+          "agent_id": "Agent ID",
+          "secret": "共享密钥",
+          "prefix": "实体前缀",
+          "include_domains": "只同步这些域",
+          "exclude_domains": "跳过这些域",
+          "include_entities": "只同步这些实体",
+          "exclude_entities": "跳过这些实体"
+        },
+        "data_description": {
+          "agent_id": "简短的小写名，例如 b。镜像实体为 <前缀><实体ID>。",
+          "secret": "自己定一个口令，不是 Home Assistant 令牌；两端必须相同。",
+          "prefix": "镜像实体 ID 的前缀，默认 <agent_id>_。",
+          "include_domains": "逗号分隔，例如 sensor, light。留空表示所有域。",
+          "exclude_domains": "逗号分隔。",
+          "include_entities": "填了就只同步这些实体。",
+          "exclude_entities": "这些实体始终不同步。"
+        }
+      },
+      "agent": {
+        "title": "连接到 hub",
+        "description": "本机会主动向 hub 建立 WebSocket 连接，这里不需要任何端口转发。令牌请用 hub 上生成的长期访问令牌。",
+        "data": {
+          "agent_id": "Agent ID",
+          "secret": "共享密钥",
+          "host": "Hub 地址",
+          "port": "Hub 端口",
+          "secure": "使用 wss（TLS）",
+          "verify_ssl": "校验 TLS 证书",
+          "token": "Hub 访问令牌",
+          "include_domains": "只同步这些域",
+          "exclude_domains": "跳过这些域",
+          "include_entities": "只同步这些实体",
+          "exclude_entities": "跳过这些实体"
+        },
+        "data_description": {
+          "agent_id": "必须与 hub 上登记的 agent ID 一致。",
+          "secret": "必须与 hub 上登记的共享密钥一致。",
+          "host": "hub 的域名或 IP。",
+          "port": "裸 Home Assistant 是 8123，走反向代理一般是 443。",
+          "secure": "hub 走 HTTPS 时打开。",
+          "verify_ssl": "仅在自签证书调试时关闭。",
+          "token": "hub 上某个用户的长期访问令牌。",
+          "include_domains": "逗号分隔，例如 sensor, light。留空表示所有域。",
+          "exclude_domains": "逗号分隔。",
+          "include_entities": "填了就只推送这些实体。",
+          "exclude_entities": "这些实体始终不同步。"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "连不上 hub。检查地址、端口、TLS 设置，以及 hub 是否在运行。",
+      "invalid_auth": "hub 拒绝了这个访问令牌。",
+      "invalid_input": "请填写所有必填项。",
+      "unknown": "发生未知错误，请查看 Home Assistant 日志。"
+    },
+    "abort": {
+      "already_configured": "hub 上已经登记过这个 agent ID。",
+      "single_instance_allowed": "已存在 agent 条目，每台实例只允许一个。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Remote Push 选项",
+        "description": "条目：{role} {agent_id}",
+        "data": {
+          "secret": "共享密钥",
+          "prefix": "实体前缀",
+          "host": "Hub 地址",
+          "port": "Hub 端口",
+          "secure": "使用 wss（TLS）",
+          "verify_ssl": "校验 TLS 证书",
+          "token": "Hub 访问令牌",
+          "include_domains": "只同步这些域",
+          "exclude_domains": "跳过这些域",
+          "include_entities": "只同步这些实体",
+          "exclude_entities": "跳过这些实体"
+        },
+        "data_description": {
+          "prefix": "修改前缀会重建所有镜像实体的 ID。",
+          "token": "hub 上某个用户的长期访问令牌。"
+        }
+      }
+    }
+  }
+}

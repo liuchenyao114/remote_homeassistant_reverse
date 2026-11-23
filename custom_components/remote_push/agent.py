@@ -62,10 +62,18 @@ class PushAgent:
 
     async def _async_stop(self, event: Event | None = None) -> None:
         self._stopping = True
+        if self._unsub_stop is not None:
+            self._unsub_stop()
+            self._unsub_stop = None
         if self._ws is not None:
             await self._ws.close()
         if self._task is not None:
             self._task.cancel()
+            self._task = None
+
+    async def async_stop(self) -> None:
+        """Stop the outbound connection loop (used on entry unload)."""
+        await self._async_stop()
 
     def _url(self) -> str:
         scheme = "wss" if self.conf.get(CONF_SECURE, False) else "ws"
