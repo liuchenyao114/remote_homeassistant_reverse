@@ -109,8 +109,34 @@ python tests/test_remote_push.py
 
 覆盖：首次全量状态推送、前缀与过滤、增量 `state_changed`、显式服务转发、实体级服务拦截、服务结果事件、断线后镜像状态清理。当前已全部通过。
 
+### 真实 HA 实例联调（已通过）
+
+在云机上用 Docker 起了**两个真实 Home Assistant 2026.11.2 实例**：A 映射端口作 hub，B 不映射任何端口、只在容器网络内主动外连 A，复现"B 无公网"的拓扑；并在 B 上安装真实的 **Uptime Kuma v2** 集成（含一个 HTTP 监控项）产生真实传感器实体。验证结果：
+
+| 用例 | 结果 |
+| --- | --- |
+| B 全量状态推送，A 生成 `b_` 前缀镜像 | 通过（18 个实体） |
+| B 改 `input_number` 42→88→99，A 增量同步 | 通过 |
+| A 调 `remote_push.call_service` 让 B 执行（42→66） | 通过 |
+| A 直接对镜像实体调 `input_number.set_value`（→33） | 通过（hub 拦截转发） |
+| 停掉 B，A 清理全部镜像（20→0）；B 重启后恢复推送 | 通过 |
+| B 上 Uptime Kuma 真实传感器推到 A | 通过：`sensor.b_ha_a_status=up`、`sensor.b_ha_a_response_time=3` 等 6 个实体 |
+
+真机联调额外发现并修复了 5 个只有在真实 HA 上才暴露的问题，详见 `VERIFICATION.md`。这些修复已包含在当前代码中。
+
 ## 限制
 
 - 同步的是**状态机中的实体状态**，不是 B 的自动化、设备注册表或配置；实体属性会带 `remote_push_agent` 标记。
 - 方向是单向的：B → A。若还要 A → B 的实体同步，在 B 上再装上游的 `remote_homeassistant` 连 A 即可（A 有公网，那个方向天然可行）。
-- 依赖 HA 的 `websocket_api`，适用于近几个大版本的 HA（2024.x 及以后）。此实现已做语法检查，但未在真实 HA 实例上跑过端到端联调。
+- 依赖 HA 的 `websocket_api`。**已在真实 HA 2026.11.2 上完成双实例联调**；代码同时兼容旧版 HA（连接清理优先用 `subscriptions`，退回 `async_register_disconnect_callback`；发送优先用 `send_message`，退回 `send_json`）。
+
+## HA 2026 兼容性说明
+
+真实 HA 2026.11.2 相比旧版有几处 API/协议变化，本实现已适配：
+
+- WebSocket 命令处理函数必须加 `@websocket_api.async_response`，否则协程不会被 await。
+- 每条发往 hub 的消息必须带**递增的 `id`**，缺失会被判为 "Received invalid command"；状态变更使用独立发送队列保证 id 顺序。
+- 服务结果不能用 hub 的请求 id 回传（会被 id 递增校验丢弃），改为新 id + `request_id` 字段关联。
+- `ActiveConnection` 不再有 `send_json`，hub→agent 改用同步的 `send_message`。
+- `ActiveConnection` 不再有 `async_register_disconnect_callback`，改用 `connection.subscriptions` 的 unsubscribe 回调做断线清理。
+- 创建长期令牌的 WebSocket 命令是 `auth/long_lived_access_token`，参数为 `lifespan`（天）与 `client_name`。
