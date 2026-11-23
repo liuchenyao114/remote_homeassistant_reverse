@@ -197,3 +197,27 @@ ALL TESTS PASSED
 | `POST /auth/login_flow` 返回 `expected a list at 'handler'` | HA 2026 把 `handler` 改成 `[类型, 唯一ID]` 二元组 | 传 `["homeassistant", null]` |
 | 测试脚本导入 `remote_push` 时报 `No module named homeassistant.config_entries` | 本地 stub 没有该模块 | `__init__.py` 里把 `ConfigEntry` 挪到 `TYPE_CHECKING` 下，仅作类型标注 |
 | 首次渲染 Hub 表单时 `prefix` 默认值显示 `_` | `f"{''}_"` | 只有已知 `agent_id` 时才生成 `<agent_id>_`，否则留空，提交时在 `normalize()` 里补 |
+
+---
+
+# 第四轮：v1.1.1 / v1.1.2 启动与停止修复
+
+装到真实 HA 后暴露两个只在 1.1.0 出现的问题，1.1.2 已修复。
+
+| 现象 | 原因 | 修复 |
+| --- | --- | --- |
+| 每次重启/关闭 HA，日志出现 `ValueError: list.remove(x): x not in list` | `EVENT_HOMEASSISTANT_STOP` 是用 `async_listen_once` 注册的；HA 自己触发后监听已被移除，代码随后又调 `unsub()` 反注册，于是 `list.remove` 抛错 | `_async_stop` 不再反注册一次性监听，只清引用 |
+| 首次全量推送缺晚加载平台的实体（如 `uptime_kuma`），要等这些实体下次变化才出现在 A 上 | agent 在 `async_setup` 阶段就连接，此时 HA 还没启动完成，部分平台尚未 `async_setup_entry` | 改为监听 `homeassistant_started` 事件后再连接。用普通监听而不是 `async_listen_once`——一次性监听触发后同样无法取消，会重演上面的 `ValueError` |
+
+版本一路 `1.1.0 → 1.1.1 → 1.1.2`，1.1.1 存活时间太短（只改了 stop 监听，启动时序问题紧接着暴露），已删除该 tag 与 Release，只保留 1.1.2。
+
+## 复测（两台真实 HA 2026.11.2，安装 1.1.2 发行包）
+
+| 用例 | 结果 |
+| --- | --- |
+| 两侧 `manifest.json` 版本 | 1.1.2 |
+| B 启动后首次推送 | 通过：`pushed 26 states to hub`（含 Kuma 的 6 个实体，说明首发即完整） |
+| A 侧镜像实体 | 通过：26 个 `b_` 实体，`sensor.b_ha_a_status=up` |
+| 连续重启期间的日志 | 通过：无 `ValueError`、无 `Traceback`；只有正常的 `agent b disconnected, mirrored states removed` |
+| 界面条目状态 | 通过：`Hub · agent b` = `loaded` |
+| CI（commit 76ad938） | hassfest ✅ / HACS ✅ / integration tests ✅ |

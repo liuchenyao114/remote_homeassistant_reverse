@@ -189,6 +189,7 @@ v1.1.0 起支持界面配置。验证时把两台实例 `configuration.yaml` 里
 - B 填错令牌时表单原地报「hub 拒绝了这个访问令牌」，不会创建条目
 - 删除 B 的 Agent 条目：A 镜像 25 → 0；重新点按添加后又恢复到 26
 - 选项流的表单生成与取值在真实 HA 实例上验证过：Hub 只有密钥/前缀/过滤，Agent 还有 host/端口/令牌，取值会与原条目数据合并；「保存后自动重载」这一步没有做端到端复测。
+- v1.1.2 修掉两个装到真机才暴露的问题：关闭时 `ValueError: list.remove(x): x not in list`、以及首次推送漏掉晚加载平台的实体（改为等 `homeassistant_started` 后再连）。详见 [`VERIFICATION.md`](./VERIFICATION.md)。
 
 ## 限制
 
