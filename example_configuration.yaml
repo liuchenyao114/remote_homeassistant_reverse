@@ -1,0 +1,36 @@
+# 复制到 A 的 configuration.yaml（有公网，hub）
+# secrets.yaml:
+#   remote_push_secret: a-very-long-random-shared-secret
+
+remote_push:
+  role: hub
+  agents:
+    - agent_id: b
+      secret: !secret remote_push_secret
+      prefix: b_
+
+
+# ---------------------------------------------------------------
+# 复制到 B 的 configuration.yaml（无公网，agent）
+# secrets.yaml:
+#   remote_push_secret: a-very-long-random-shared-secret   # 与 A 一致
+#   a_long_lived_token: <在 A 的个人资料里生成的长期访问令牌>
+
+remote_push:
+  role: agent
+  agent_id: b
+  secret: !secret remote_push_secret
+  host: ha.example.com
+  port: 443
+  secure: true
+  verify_ssl: true
+  token: !secret a_long_lived_token
+
+  include_domains:
+    - sensor
+    - binary_sensor
+    - switch
+    - light
+    - climate
+  exclude_entities:
+    - sensor.internal_debug
