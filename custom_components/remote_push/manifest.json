@@ -1,11 +1,12 @@
 {
   "domain": "remote_push",
-  "name": "Remote HA reverse sync",
-  "codeowners": [],
+  "name": "Remote Push",
+  "codeowners": ["@liuchenyao114"],
   "config_flow": false,
   "dependencies": ["websocket_api"],
-  "documentation": "https://github.com/custom-components/remote_homeassistant",
+  "documentation": "https://github.com/liuchenyao114/remote_homeassistant_reverse",
   "integration_type": "service",
   "iot_class": "local_push",
+  "issue_tracker": "https://github.com/liuchenyao114/remote_homeassistant_reverse/issues",
   "version": "1.0.0"
 }
