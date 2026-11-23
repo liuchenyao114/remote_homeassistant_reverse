@@ -87,7 +87,8 @@ class PushAgent:
         if state is None or state is CoreState.running:
             return
         started = asyncio.Event()
-        unsub = self.hass.bus.async_listen_once(
+        # A plain listener (not once) can be unsubscribed safely at any time.
+        unsub = self.hass.bus.async_listen(
             EVENT_HOMEASSISTANT_STARTED, lambda _event: started.set()
         )
         try:

@@ -8,5 +8,5 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/liuchenyao114/remote_homeassistant_reverse/issues",
-  "version": "1.1.1"
+  "version": "1.1.2"
 }
