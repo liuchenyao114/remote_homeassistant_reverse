@@ -22,9 +22,9 @@
           "exclude_entities": "跳过这些实体"
         },
         "data_description": {
-          "agent_id": "简短的小写名，例如 b。镜像实体为 <前缀><实体ID>。",
+          "agent_id": "简短的小写名，例如 b。镜像实体 ID 会在原 ID 前面加上前缀。",
           "secret": "自己定一个口令，不是 Home Assistant 令牌；两端必须相同。",
-          "prefix": "镜像实体 ID 的前缀，默认 <agent_id>_。",
+          "prefix": "镜像实体 ID 的前缀，默认为 agent_id 加一个下划线。",
           "include_domains": "逗号分隔，例如 sensor, light。留空表示所有域。",
           "exclude_domains": "逗号分隔。",
           "include_entities": "填了就只同步这些实体。",

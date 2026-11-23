@@ -22,9 +22,9 @@
           "exclude_entities": "Skip these entities"
         },
         "data_description": {
-          "agent_id": "Short lowercase name, e.g. b. Mirrored entities become <prefix><entity_id>.",
+          "agent_id": "Short lowercase name, e.g. b. Every mirrored entity id gets the prefix in front of it.",
           "secret": "Any password you choose. It is not the Home Assistant token; both sides must match.",
-          "prefix": "Prefix added to every mirrored entity id. Defaults to <agent_id>_.",
+          "prefix": "Prefix added to every mirrored entity id. Defaults to the agent id plus an underscore.",
           "include_domains": "Comma separated, e.g. sensor, light. Empty means all domains.",
           "exclude_domains": "Comma separated.",
           "include_entities": "If set, only these entities are mirrored.",
