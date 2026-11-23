@@ -35,9 +35,11 @@ typing_mod = types.ModuleType("homeassistant.helpers.typing")
 EVENT_CALL_SERVICE = "call_service"
 EVENT_STATE_CHANGED = "state_changed"
 EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
+EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
 const.EVENT_CALL_SERVICE = EVENT_CALL_SERVICE
 const.EVENT_STATE_CHANGED = EVENT_STATE_CHANGED
 const.EVENT_HOMEASSISTANT_STOP = EVENT_HOMEASSISTANT_STOP
+const.EVENT_HOMEASSISTANT_STARTED = EVENT_HOMEASSISTANT_STARTED
 
 
 def callback(func):
@@ -56,6 +58,7 @@ core.split_entity_id = split_entity_id
 core.HomeAssistant = type("HomeAssistant", (), {})
 core.Event = type("Event", (), {})
 core.Context = type("Context", (), {})
+core.CoreState = type("CoreState", (), {"running": "running", "starting": "starting"})
 
 
 class _CV:

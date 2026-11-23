@@ -9,8 +9,12 @@ from typing import Any
 
 import aiohttp
 
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP, EVENT_STATE_CHANGED
-from homeassistant.core import HomeAssistant, Event, split_entity_id
+from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STARTED,
+    EVENT_HOMEASSISTANT_STOP,
+    EVENT_STATE_CHANGED,
+)
+from homeassistant.core import CoreState, HomeAssistant, Event, split_entity_id
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -62,9 +66,11 @@ class PushAgent:
 
     async def _async_stop(self, event: Event | None = None) -> None:
         self._stopping = True
-        if self._unsub_stop is not None:
+        # When HA fires the one-time stop listener it removes the job itself,
+        # so only unsubscribe when we are called directly.
+        if event is None and self._unsub_stop is not None:
             self._unsub_stop()
-            self._unsub_stop = None
+        self._unsub_stop = None
         if self._ws is not None:
             await self._ws.close()
         if self._task is not None:
@@ -74,6 +80,20 @@ class PushAgent:
     async def async_stop(self) -> None:
         """Stop the outbound connection loop (used on entry unload)."""
         await self._async_stop()
+
+    async def _async_wait_started(self) -> None:
+        """Wait until HA finished starting so the first snapshot is complete."""
+        state = getattr(self.hass, "state", None)
+        if state is None or state is CoreState.running:
+            return
+        started = asyncio.Event()
+        unsub = self.hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED, lambda _event: started.set()
+        )
+        try:
+            await started.wait()
+        finally:
+            unsub()
 
     def _url(self) -> str:
         scheme = "wss" if self.conf.get(CONF_SECURE, False) else "ws"
@@ -111,6 +131,7 @@ class PushAgent:
         return result
 
     async def _run(self) -> None:
+        await self._async_wait_started()
         while not self._stopping:
             try:
                 await self._session()
