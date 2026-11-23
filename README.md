@@ -98,6 +98,17 @@ data:
 - `secure: true` 时走 wss，公网环境强烈建议开启；`verify_ssl: false` 仅用于自签证书调试。
 - 没有任何端口需要从公网访问 B。
 
+## 测试
+
+仓库自带一个不依赖真实 Home Assistant 的端到端测试（用 aiohttp 模拟 HA WebSocket 服务端，stub 掉 HA API）：
+
+```bash
+pip install aiohttp voluptuous
+python tests/test_remote_push.py
+```
+
+覆盖：首次全量状态推送、前缀与过滤、增量 `state_changed`、显式服务转发、实体级服务拦截、服务结果事件、断线后镜像状态清理。当前已全部通过。
+
 ## 限制
 
 - 同步的是**状态机中的实体状态**，不是 B 的自动化、设备注册表或配置；实体属性会带 `remote_push_agent` 标记。

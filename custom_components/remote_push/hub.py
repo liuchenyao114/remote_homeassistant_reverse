@@ -172,13 +172,13 @@ class PushHub:
         self.hass.states.async_remove(local_id)
         self.entity_map.pop(local_id.lower(), None)
 
-    def send_to_agent(self, agent_id: str, payload: dict[str, Any]) -> bool:
+    async def send_to_agent(self, agent_id: str, payload: dict[str, Any]) -> bool:
         connection = self.connections.get(agent_id)
         if connection is None:
             _LOGGER.warning("no live connection for agent %s", agent_id)
             return False
         try:
-            connection.send_json(payload)
+            await connection.send_json(payload)
         except Exception as err:  # noqa: BLE001 - websocket may close at any time
             _LOGGER.error("failed to send to agent %s: %s", agent_id, err)
             return False
@@ -213,7 +213,7 @@ class PushHub:
                 "entity_id": original_ids,
                 "service_data": {**service_data, "entity_id": original_ids},
             }
-            self.send_to_agent(agent_id, payload)
+            self.hass.loop.create_task(self.send_to_agent(agent_id, payload))
 
     async def async_call_service(self, call: Any) -> None:
         """Explicit proxy service, cleaner than entity-level interception."""
@@ -224,6 +224,10 @@ class PushHub:
         entity_ids = call.data.get("entity_id") or []
         if isinstance(entity_ids, str):
             entity_ids = [entity_ids]
+        entity_ids = [
+            self._original_entity_id(agent_id, str(entity_id))
+            for entity_id in entity_ids
+        ]
         payload = {
             "id": next(self._ids),
             "type": WS_SERVICE_CALL,
@@ -232,7 +236,7 @@ class PushHub:
             "entity_id": entity_ids,
             "service_data": {**call.data.get("service_data", {}), "entity_id": entity_ids},
         }
-        self.send_to_agent(agent_id, payload)
+        await self.send_to_agent(agent_id, payload)
 
 
 @websocket_api.websocket_command(
@@ -255,6 +259,10 @@ async def ws_register(
         connection.send_error(msg["id"], "unauthorized", "unknown agent or bad secret")
         return
     hub.attach(agent_id, connection)
+    if hasattr(connection, "async_register_disconnect_callback"):
+        connection.async_register_disconnect_callback(
+            lambda: hub.detach_connection(connection)
+        )
     connection.send_result(msg["id"], {"agent_id": agent_id, "prefix": conf["prefix"]})
     _LOGGER.info("agent %s registered", agent_id)
 

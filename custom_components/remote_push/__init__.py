@@ -101,8 +101,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             _LOGGER.error("remote_push hub requires at least one agent entry")
             return False
         hub = PushHub(hass, agents_conf)
-        await hub.async_start()
         hass.data[DOMAIN]["hub"] = hub
+        await hub.async_start()
         return True
 
     missing = [
