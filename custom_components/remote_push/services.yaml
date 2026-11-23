@@ -1,0 +1,38 @@
+call_service:
+  name: Call service on agent
+  description: 在指定的远端 agent（无公网的那台 Home Assistant）上执行一次服务调用。
+  fields:
+    agent_id:
+      name: Agent ID
+      description: hub 配置 `agents` 列表里该 agent 的 `agent_id`。
+      required: true
+      example: b
+      selector:
+        text:
+    domain:
+      name: Domain
+      description: 目标服务所属的域，例如 `light`、`switch`。
+      required: true
+      example: light
+      selector:
+        text:
+    service:
+      name: Service
+      description: 要在远端执行的服务名，例如 `turn_on`。
+      required: true
+      example: turn_on
+      selector:
+        text:
+    entity_id:
+      name: Entity ID
+      description: 远端（B 侧）的原始实体 ID，不是 A 上的镜像实体 ID。
+      required: false
+      example: light.living_room
+      selector:
+        text:
+    service_data:
+      name: Service data
+      description: 附加的服务参数，例如 `{"brightness": 200}`。
+      required: false
+      selector:
+        object:

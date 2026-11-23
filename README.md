@@ -38,6 +38,7 @@ HACS 会在有新 Release 时提示升级，升级后重启生效。
     const.py
     hub.py
     agent.py
+    services.yaml
     brand/icon.png
 ```
 
