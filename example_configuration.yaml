@@ -1,3 +1,8 @@
+# 推荐：不用改这个文件。
+# 在 Home Assistant 里「设置 → 设备与服务 → 添加集成 → Remote Push」点按配置：
+#   A 选 Hub（登记 agent），B 选 Agent（填 hub 地址与令牌）。
+# 下面这份 YAML 仅用于希望用文件管理配置的场景，界面与 YAML 不要混用。
+
 # 复制到 A 的 configuration.yaml（有公网，hub）
 # secrets.yaml:
 #   remote_push_secret: a-very-long-random-shared-secret

@@ -23,9 +23,9 @@ B(agent, 无公网) ──ws/wss 主动外连──> A(hub, 有公网) /api/webs
 2. 仓库地址填 `https://github.com/liuchenyao114/remote_homeassistant_reverse`，类别选 **Integration**
 3. 在 HACS 中搜索 **Remote Push** → 下载
 4. 重启 Home Assistant
-5. 按下面「配置」章节在 **A 和 B 两侧**的 `configuration.yaml` 写入 `remote_push:` 配置，再次重启
+5. 到「设置 → 设备与服务 → 添加集成」搜索 **Remote Push**，按下面「配置」章节在 A、B 两侧点按添加（角色不同）
 
-HACS 会在有新 Release 时提示升级，升级后重启生效。
+HACS 会在有新 Release 时提示升级，升级后重启生效，已配好的条目会保留。
 
 ### 手动安装（不使用 HACS）
 
@@ -38,15 +38,54 @@ HACS 会在有新 Release 时提示升级，升级后重启生效。
     const.py
     hub.py
     agent.py
+    config_flow.py
     services.yaml
+    strings.json
+    translations/en.json
+    translations/zh-Hans.json
     brand/icon.png
 ```
 
-## 配置
+## 配置（界面点按）
 
-### A（有公网，hub）
+全部在「设置 → 设备与服务 → 添加集成 → Remote Push」里完成，选角色后填表即可，不需要改 YAML，提交后立即生效、无需重启。
+
+### A（有公网）：选 Hub — 公网实例
 
 先在 A 上生成长期访问令牌：个人资料 → 安全 → 长期访问令牌 → 创建令牌。建议为 B 单独建一个受限用户，用它生成令牌，**不要用管理员主账号令牌**。
+
+然后在 A 上：添加集成 → Remote Push → **Hub — 公网实例（登记一个远端 agent）**，填：
+
+| 字段 | 说明 |
+| --- | --- |
+| Agent ID | 小写短名，如 `b`；镜像实体为 `<前缀><实体ID>` |
+| 共享密钥 | 自己定的口令，与 HA 令牌无关，两端必须一致 |
+| 实体前缀 | 默认 `<agent_id>_`，例如 `b_` |
+| 只同步这些域 / 跳过这些域 | 逗号分隔，如 `sensor, light`；留空表示所有域 |
+| 只同步这些实体 / 跳过这些实体 | 实体选择器，留空表示不过滤 |
+
+A 上可以登记多个 agent，每个 agent 对应一个条目。
+
+### B（无公网）：选 Agent — 无公网
+
+在 B 上：添加集成 → Remote Push → **Agent — 无公网（主动连接 hub）**，填 Agent ID、共享密钥（与 A 一致）、A 的地址、端口、是否 `wss`、以及 A 的长期访问令牌。
+
+提交时集成会先用该令牌访问 `http(s)://<host>:<port>/api/` 做一次校验：
+
+- 连不上 → 表单提示「连不上 hub」
+- 令牌被拒 → 表单提示「hub 拒绝了这个访问令牌」
+
+校验通过后 B 立刻主动外连 A，日志出现 `pushed N states to hub`。一台实例只允许一个 Agent 条目。
+
+### 修改与删除
+
+- 「设置 → 设备与服务 → Remote Push → 配置」可改密钥 / 前缀 / host / 端口 / 令牌 / 过滤条件，保存后条目自动重载
+- 删除 B 的 Agent 条目：B 停止推送
+- 删除 A 上某个 agent 条目：A 清掉该 agent 的镜像实体；最后一条 agent 条目删掉后 hub 一并注销
+
+### 可选：仍然支持 YAML
+
+界面和 YAML 两种方式**不要混用**（同一边只用一种）。YAML 配置写在 `configuration.yaml`：
 
 ```yaml
 remote_push:
@@ -56,10 +95,6 @@ remote_push:
       secret: !secret remote_push_secret
       prefix: b_
 ```
-
-`secret` 是 A、B 两边约定的共享密钥，与 HA 令牌无关，用于防止他人冒充 agent 注册。
-
-### B（无公网，agent）
 
 ```yaml
 remote_push:
@@ -146,12 +181,21 @@ python tests/test_remote_push.py
 
 真机联调额外发现并修复了 5 个只在真实 HA 上才暴露的问题，详见 [`VERIFICATION.md`](./VERIFICATION.md)。
 
+### 界面点按配置也在真机验证过
+
+v1.1.0 起支持界面配置。验证时把两台实例 `configuration.yaml` 里的 `remote_push:` 整段删掉，完全通过「添加集成」创建：
+
+- A 选 Hub、B 选 Agent，两个条目都创建成功，日志 `pushed 26 states to hub`，A 侧出现 26 个 `b_` 镜像实体
+- B 填错令牌时表单原地报「hub 拒绝了这个访问令牌」，不会创建条目
+- 删除 B 的 Agent 条目：A 镜像 25 → 0；重新点按添加后又恢复到 26
+- 选项流的表单生成与取值在真实 HA 实例上验证过：Hub 只有密钥/前缀/过滤，Agent 还有 host/端口/令牌，取值会与原条目数据合并；「保存后自动重载」这一步没有做端到端复测。
+
 ## 限制
 
 - 同步的是**状态机中的实体状态**，不是 B 的自动化、设备注册表或配置。
 - 方向是单向的：B → A（状态），A → B（服务调用）。若还要 A → B 的实体同步，在 B 上再装上游的 `remote_homeassistant` 连 A 即可（A 有公网，那个方向天然可行）。
-- 集成通过 YAML 配置（`config_flow: false`），不支持在「设置 → 设备与服务」里点按添加。
-- 依赖 HA 的 `websocket_api`。**已在真实 HA 2026.11.2 完成双实例联调**，`hacs.json` 声明的最低版本为 2024.1.0；代码同时兼容旧版 HA（连接清理优先用 `subscriptions`，退回 `async_register_disconnect_callback`；发送优先用 `send_message`，退回 `send_json`）。
+- 一台实例上只允许一个 Agent 条目；A 侧可以登记多个 agent。
+- 依赖 HA 的 `websocket_api`。**已在真实 HA 2026.11.2 完成双实例联调**，`hacs.json` 声明的最低版本为 2024.11.0（选项流依赖该版本的 `OptionsFlow.config_entry` 自动注入）；代码同时兼容旧版 HA（连接清理优先用 `subscriptions`，退回 `async_register_disconnect_callback`；发送优先用 `send_message`，退回 `send_json`）。
 
 ## HA 2026 兼容性说明
 

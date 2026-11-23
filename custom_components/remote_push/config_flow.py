@@ -100,17 +100,15 @@ def _filters_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
 def hub_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Schema for registering an agent on the public (hub) instance."""
     defaults = defaults or {}
+    agent_id = str(defaults.get(CONF_AGENT_ID) or "")
+    default_prefix = defaults.get(CONF_PREFIX) or (f"{agent_id}_" if agent_id else "")
     return vol.Schema(
         {
             vol.Required(
                 CONF_AGENT_ID, default=defaults.get(CONF_AGENT_ID, "")
             ): TEXT,
             vol.Required(CONF_SECRET, default=defaults.get(CONF_SECRET, "")): PASSWORD,
-            vol.Optional(
-                CONF_PREFIX,
-                default=defaults.get(CONF_PREFIX)
-                or f"{defaults.get(CONF_AGENT_ID, '')}_",
-            ): TEXT,
+            vol.Optional(CONF_PREFIX, default=default_prefix): TEXT,
             **_filters_schema(defaults),
         }
     )

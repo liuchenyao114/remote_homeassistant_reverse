@@ -154,3 +154,46 @@ ALL TESTS PASSED
 
 注意：在补 `services.yaml` 之前，真实 HA 每次读取服务描述都会打印
 `ERROR Failed to load services.yaml for integration: remote_push`；补上后该报错消失。
+
+---
+
+# 第三轮：v1.1.0 界面点按配置（config flow）
+
+## 代码改动
+
+| 文件 | 变化 |
+| --- | --- |
+| `config_flow.py`（新增） | 角色菜单（Hub / Agent）+ 两套表单；Agent 提交前用令牌访问 `http(s)://host:port/api/` 校验，401/403 → `invalid_auth`，连不上 → `cannot_connect`；同实例只允许一个 Agent 条目，Hub 侧同 agent_id 不重复登记；`OptionsFlow` 按角色给不同字段 |
+| `__init__.py` | 新增 `async_setup_entry` / `async_unload_entry` / 更新监听；hub 按条目增删 agent（`PushHub.add_agent` / `async_remove_agent`），最后一条 agent 删掉后 hub 注销；YAML 路径保留 |
+| `hub.py` | `PushHub(hass, agents_conf=None)`、`add_agent()`、`async_remove_agent()`、`_started` 幂等启动 |
+| `agent.py` | 新增 `async_stop()`，并回收停止监听 |
+| `strings.json` + `translations/en.json` + `translations/zh-Hans.json`（新增） | 中英文案，表单字段说明与错误提示 |
+| `manifest.json` | `config_flow: true`，版本 1.1.0 |
+| `hacs.json` | 最低 HA 版本提到 2024.11.0（选项流依赖该版本自动注入的 `OptionsFlow.config_entry`） |
+
+## 真机验证（HA 2026.11.2，两台实例）
+
+前置：把 A、B 的 `configuration.yaml` 里 `remote_push:` 整段删除，重启后集成处于未配置状态，完全靠界面流程建立。
+
+| 用例 | 结果 |
+| --- | --- |
+| A：`POST /api/config/config_entries/flow` 打开流程 | 通过：`type=menu`，`menu_options=[hub, agent]` |
+| A：选 Hub → 表单字段 | 通过：`agent_id`(text)、`secret`(text)、`prefix`(text)、`include/exclude_domains`(text)、`include/exclude_entities`(entity) |
+| A：提交 Hub 表单 | 通过：`type=create_entry`，标题 `Hub · agent b`，条目状态 `loaded` |
+| B：选 Agent → 表单字段 | 通过：在 Hub 字段基础上多 `host`(text)、`port`(number, 默认 8123)、`secure`(boolean)、`verify_ssl`(boolean)、`token`(text) |
+| B：填错令牌提交 | 通过：表单原地返回 `errors={"base": "invalid_auth"}`，未创建条目 |
+| B：填正确令牌提交 | 通过：`create_entry`，标题 `Agent b → ha-a` |
+| 条目生效（无 YAML） | 通过：B 日志 `pushed 26 states to hub`，A 侧 26 个 `b_` 镜像实体，含 `sensor.b_ha_a_status=up` |
+| 删除 B 的 Agent 条目 | 通过：`DELETE .../entry/{id}` → `{"require_restart": false}`，A 镜像 25 → 0 |
+| 重新点按添加 Agent | 通过：镜像恢复到 26 |
+| 选项流（表单与取值） | 通过：在 HA 运行环境中直接驱动 `RemotePushOptionsFlow.async_step_init`，Hub 给 6 个字段、Agent 给 10 个字段，取值与原条目数据合并且类型正确（`port` 转 int、域名列表按逗号拆分、`agent_id` 不被表单覆盖） |
+
+未做端到端复测：选项流「保存 → 条目自动重载」这一段（`entry.add_update_listener` → `async_reload`）。代码路径简单，但没在实例上跑通保存动作。
+
+## 过程中遇到的问题
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `POST /auth/login_flow` 返回 `expected a list at 'handler'` | HA 2026 把 `handler` 改成 `[类型, 唯一ID]` 二元组 | 传 `["homeassistant", null]` |
+| 测试脚本导入 `remote_push` 时报 `No module named homeassistant.config_entries` | 本地 stub 没有该模块 | `__init__.py` 里把 `ConfigEntry` 挪到 `TYPE_CHECKING` 下，仅作类型标注 |
+| 首次渲染 Hub 表单时 `prefix` 默认值显示 `_` | `f"{''}_"` | 只有已知 `agent_id` 时才生成 `<agent_id>_`，否则留空，提交时在 `normalize()` 里补 |
