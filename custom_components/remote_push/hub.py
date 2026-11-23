@@ -178,7 +178,11 @@ class PushHub:
             _LOGGER.warning("no live connection for agent %s", agent_id)
             return False
         try:
-            await connection.send_json(payload)
+            send_message = getattr(connection, "send_message", None)
+            if send_message is not None:
+                send_message(payload)
+            else:  # older HA / test doubles expose async send_json
+                await connection.send_json(payload)
         except Exception as err:  # noqa: BLE001 - websocket may close at any time
             _LOGGER.error("failed to send to agent %s: %s", agent_id, err)
             return False
