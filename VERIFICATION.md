@@ -88,3 +88,69 @@ update.b_uptime_kuma_uptime_kuma_version = off
 - 测试中 A 的登录 token 用的是 `auth/long_lived_access_token`（`lifespan: 30`、`client_name`）生成的 30 天令牌；HA 2026 不再接受旧的 `config/auth/long_lived_token/create`。
 - 云机上的验证环境仍在：容器 `ha-a`（宿主 18123）、`ha-b`（无端口）、`uptime-kuma`（宿主 3001），配置目录 `/data/ha-real/{a,b}/config`。仅用于测试，含测试口令，勿直接用于生产。
 - 本地 `tests/test_remote_push.py` 的 stub 测试与真机测试均通过；stub 不模拟 HA 的 id 校验与连接清理，因此上述问题只能由真机暴露。
+
+---
+
+# 第二轮：HACS 打包与发行包真机安装验证
+
+## 仓库改造内容
+
+| 项目 | 说明 |
+| --- | --- |
+| `hacs.json` | `name: Remote Push`、`homeassistant: 2024.1.0`、`render_readme: true` |
+| `custom_components/remote_push/manifest.json` | 补 `codeowners: ["@liuchenyao114"]`、`documentation`、`issue_tracker`，指向本仓库 |
+| `custom_components/remote_push/brand/icon.png` | 256×256 图标，HACS 列表显示用 |
+| `custom_components/remote_push/services.yaml` | 描述 `remote_push.call_service` 的 5 个字段（hassfest 强制要求） |
+| `LICENSE` | MIT |
+| `.github/workflows/validate.yml` | hassfest + HACS validation + 端到端测试，三个 job |
+| 仓库元信息 | description、topics（`home-assistant`、`hacs`、`hacs-integration`、`integration` 等）、Issues 开启 |
+| Release | `v1.0.0`，与 manifest `version` 一致 |
+
+## CI 结果（commit eeac868）
+
+```
+hassfest            success
+HACS                success
+integration tests   success
+```
+
+期间修掉两个 hassfest 报错：注册了服务但没有 `services.yaml`；`services.yaml` 里 `{"brightness": 200}` 未加引号导致 YAML 解析失败。
+
+## 发行包结构验证
+
+按 HACS 的下载路径取 `archive/refs/tags/v1.0.0.zip`（35 KB，22 个条目），解包后：
+
+```
+remote_homeassistant_reverse-1.0.0/
+  custom_components/remote_push/
+    __init__.py  agent.py  const.py  hub.py
+    manifest.json  services.yaml  brand/icon.png
+  hacs.json  LICENSE  README.md  VERIFICATION.md
+  tests/test_remote_push.py  example_configuration.yaml
+```
+
+`manifest.json` 的 `version` = `1.0.0`，与 tag 一致（HACS 以此判断升级）。发行包内测试套件重跑：
+
+```
+PASS  initial state push + prefix + filters
+PASS  incremental state_changed push
+PASS  service call forwarding + result event
+PASS  entity-level service interception
+PASS  disconnect cleanup
+ALL TESTS PASSED
+```
+
+## 真机按 HACS 安装方式复测
+
+把发行包里的 `custom_components/remote_push`（含 `brand/`、`services.yaml`）覆盖到两台真实 HA 2026.11.2 的配置目录，`docker restart` 后验证：
+
+| 用例 | 结果 |
+| --- | --- |
+| B 启动后自动连 A 并全量推送 | 通过：`pushed 18 states to hub` |
+| A 侧镜像实体 | 通过：26 个 `b_` 前缀实体，含 Uptime Kuma 的 `sensor.b_ha_a_status=up` |
+| A 重启后 B 自动重连并恢复镜像 | 通过：重启 A 后镜像数恢复为 26 |
+| `services.yaml` 被真实 HA 解析 | 通过：`/api/services` 返回 `remote_push.call_service`，`name=Call service on agent`，字段 `agent_id/domain/service/entity_id/service_data` |
+| A 调 `remote_push.call_service` 改 B 的 `input_number` | 通过：77.0 → 55.0，A 侧镜像同步 |
+
+注意：在补 `services.yaml` 之前，真实 HA 每次读取服务描述都会打印
+`ERROR Failed to load services.yaml for integration: remote_push`；补上后该报错消失。
