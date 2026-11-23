@@ -51,6 +51,7 @@ class PushAgent:
         self._ws: Any = None
         self._seq = itertools.count(1)
         self._unsub_stop: Any = None
+        self._out_queue: asyncio.Queue[dict[str, Any]] | None = None
 
     async def async_start(self) -> None:
         self._unsub_stop = self.hass.bus.async_listen_once(
@@ -124,6 +125,7 @@ class PushAgent:
         )
         self._ws = ws
         unsub = None
+        sender_task = None
         try:
             await self._handshake(ws)
             states = self._collect_states()
@@ -135,6 +137,8 @@ class PushAgent:
                 }
             )
             _LOGGER.info("pushed %d states to hub", len(states))
+            self._out_queue = asyncio.Queue()
+            sender_task = self.hass.loop.create_task(self._drain_outbox(ws))
             unsub = self.hass.bus.async_listen(
                 EVENT_STATE_CHANGED, self._on_state_changed
             )
@@ -155,6 +159,9 @@ class PushAgent:
         finally:
             if unsub is not None:
                 unsub()
+            self._out_queue = None
+            if sender_task is not None:
+                sender_task.cancel()
             self._ws = None
             await ws.close()
 
@@ -199,9 +206,14 @@ class PushAgent:
             return
         new_state = event.data.get("new_state")
         if new_state is None:
-            payload = {"type": WS_REMOVE, "entity_id": entity_id}
+            payload = {
+                "id": next(self._seq),
+                "type": WS_REMOVE,
+                "entity_id": entity_id,
+            }
         else:
             payload = {
+                "id": next(self._seq),
                 "type": WS_STATE_CHANGED,
                 "entity_id": entity_id,
                 "state": new_state.state,
@@ -210,17 +222,25 @@ class PushAgent:
         self._schedule_send(payload)
 
     def _schedule_send(self, payload: dict[str, Any]) -> None:
-        if self._ws is None or self._ws.closed:
+        if self._ws is None or self._ws.closed or self._out_queue is None:
             return
-        self.hass.loop.create_task(self._safe_send(payload))
+        self._out_queue.put_nowait(payload)
+
+    async def _drain_outbox(self, ws: Any) -> None:
+        """Send queued messages in order so hub-side id checks stay monotonic."""
+        queue = self._out_queue
+        if queue is None:
+            return
+        while True:
+            payload = await queue.get()
+            try:
+                await ws.send_json(payload)
+            except Exception as err:  # noqa: BLE001 - connection may drop mid-send
+                _LOGGER.error("failed to send state to hub: %s", err)
+                return
 
     async def _safe_send(self, payload: dict[str, Any]) -> None:
-        if self._ws is None or self._ws.closed:
-            return
-        try:
-            await self._ws.send_json(payload)
-        except Exception as err:  # noqa: BLE001 - connection may drop mid-send
-            _LOGGER.error("failed to send state to hub: %s", err)
+        self._schedule_send(payload)
 
     async def _handle_service_call(self, data: dict[str, Any]) -> None:
         domain = data.get("domain")
@@ -230,9 +250,13 @@ class PushAgent:
             await self.hass.services.async_call(
                 domain, service, service_data, blocking=True
             )
-            result = {"ok": True}
+            outcome: dict[str, Any] = {"ok": True}
         except Exception as err:  # noqa: BLE001 - report back to hub
-            result = {"ok": False, "error": str(err)[:200]}
-        result["type"] = WS_SERVICE_RESULT
-        result["id"] = data.get("id")
-        await self._safe_send(result)
+            outcome = {"ok": False, "error": str(err)[:200]}
+        payload = {
+            "id": next(self._seq),
+            "type": WS_SERVICE_RESULT,
+            "request_id": data.get("id"),
+            **outcome,
+        }
+        self._schedule_send(payload)
