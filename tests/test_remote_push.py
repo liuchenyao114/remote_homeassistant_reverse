@@ -113,6 +113,7 @@ def async_register_command(hass, command):
 
 websocket_api.websocket_command = websocket_command
 websocket_api.async_register_command = async_register_command
+websocket_api.async_response = lambda func: func
 websocket_api.DOMAIN = "websocket_api"
 
 _SESSION: aiohttp.ClientSession | None = None
