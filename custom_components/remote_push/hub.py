@@ -264,7 +264,11 @@ async def ws_register(
         connection.send_error(msg["id"], "unauthorized", "unknown agent or bad secret")
         return
     hub.attach(agent_id, connection)
-    if hasattr(connection, "async_register_disconnect_callback"):
+    subscriptions = getattr(connection, "subscriptions", None)
+    if isinstance(subscriptions, dict):
+        # HA >= 2026: connection close runs every subscription's unsubscribe.
+        subscriptions[(DOMAIN, agent_id)] = lambda: hub.detach_connection(connection)
+    elif hasattr(connection, "async_register_disconnect_callback"):
         connection.async_register_disconnect_callback(
             lambda: hub.detach_connection(connection)
         )
