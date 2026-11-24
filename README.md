@@ -190,6 +190,7 @@ v1.1.0 起支持界面配置。验证时把两台实例 `configuration.yaml` 里
 - 删除 B 的 Agent 条目：A 镜像 25 → 0；重新点按添加后又恢复到 26
 - 选项流的表单生成与取值在真实 HA 实例上验证过：Hub 只有密钥/前缀/过滤，Agent 还有 host/端口/令牌，取值会与原条目数据合并；「保存后自动重载」这一步没有做端到端复测。
 - v1.1.2 修掉两个装到真机才暴露的问题：关闭时 `ValueError: list.remove(x): x not in list`、以及首次推送漏掉晚加载平台的实体（改为等 `homeassistant_started` 后再连）。详见 [`VERIFICATION.md`](./VERIFICATION.md)。
+- v1.1.3 把 WebSocket 心跳期间对端关闭连接导致的 `ClientConnectionResetError: Cannot write to closing transport` 当正常断线处理，不再刷 ERROR traceback，连接会自动重建。
 
 ## 限制
 
@@ -208,6 +209,7 @@ v1.1.0 起支持界面配置。验证时把两台实例 `configuration.yaml` 里
 - `ActiveConnection` 不再有 `send_json`，hub→agent 改用 `send_message`。
 - `ActiveConnection` 不再有 `async_register_disconnect_callback`，改用 `connection.subscriptions` 的 unsubscribe 回调做断线清理。
 - 创建长期令牌的 WebSocket 命令是 `auth/long_lived_access_token`，参数为 `lifespan`（天）与 `client_name`。
+- aiohttp 3.13/3.14 在收到 PING 后若对端已开始关闭，写 PONG 会抛 `ClientConnectionResetError`；v1.1.3 起按正常断线处理并自动重连，不会在日志里打印 traceback。
 
 ## 许可
 

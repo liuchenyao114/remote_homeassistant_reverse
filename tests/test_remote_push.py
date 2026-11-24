@@ -376,6 +376,43 @@ async def main() -> None:
     )
     await agent.async_start()
 
+    # A heartbeat arriving while the transport is closing must not surface as
+    # an ERROR: aiohttp raises from pong() even though this is just a disconnect.
+    class _ClosingWS:
+        async def close(self):
+            raise aiohttp.ClientConnectionResetError(
+                "Cannot write to closing transport"
+            )
+
+    await agent._close_ws(_ClosingWS())
+    from remote_push import agent as agent_mod
+
+    class _OneShotAgent(PushAgent):
+        def __init__(self):
+            self._stopping = False
+            self.calls = 0
+
+        async def _async_wait_started(self):
+            return None
+
+        async def _session(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise aiohttp.ClientConnectionResetError(
+                    "Cannot write to closing transport"
+                )
+            self._stopping = True
+
+    probe = _OneShotAgent()
+    old_delay = agent_mod.RECONNECT_DELAY
+    agent_mod.RECONNECT_DELAY = 0
+    try:
+        await probe._run()
+    finally:
+        agent_mod.RECONNECT_DELAY = old_delay
+    assert probe.calls == 2, "disconnect race was not retried"
+    print("PASS  heartbeat close race handled without error")
+
     assert await wait_for(
         lambda: "sensor.b_temp" in hub_hass.states.entities
         and "light.b_living" in hub_hass.states.entities

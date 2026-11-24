@@ -72,7 +72,7 @@ class PushAgent:
             self._unsub_stop()
         self._unsub_stop = None
         if self._ws is not None:
-            await self._ws.close()
+            await self._close_ws(self._ws)
         if self._task is not None:
             self._task.cancel()
             self._task = None
@@ -95,6 +95,15 @@ class PushAgent:
             await started.wait()
         finally:
             unsub()
+
+    async def _close_ws(self, ws: Any) -> None:
+        """Close a websocket without turning a close race into an error."""
+        try:
+            await ws.close()
+        except OSError as err:
+            # aiohttp can raise while replying to a PING on a transport that is
+            # already closing; the connection is gone either way.
+            _LOGGER.debug("remote_push websocket close race: %s", err)
 
     def _url(self) -> str:
         scheme = "wss" if self.conf.get(CONF_SECURE, False) else "ws"
@@ -138,7 +147,13 @@ class PushAgent:
                 await self._session()
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - keep retrying on any transport error
+            except (aiohttp.ClientConnectionResetError, ConnectionResetError) as err:
+                # aiohttp 3.13+ may fail to write the PONG when the peer closes
+                # during a heartbeat. Treat it as a normal disconnect.
+                _LOGGER.debug("remote_push websocket disconnected: %s", err)
+            except OSError as err:
+                _LOGGER.warning("remote_push connection error, retrying: %s", err)
+            except Exception:  # noqa: BLE001 - keep retrying on any other error
                 _LOGGER.exception("remote_push session failed, retrying")
             if self._stopping:
                 break
@@ -193,7 +208,7 @@ class PushAgent:
             if sender_task is not None:
                 sender_task.cancel()
             self._ws = None
-            await ws.close()
+            await self._close_ws(ws)
 
     async def _handshake(self, ws: Any) -> None:
         hello = await ws.receive_json()

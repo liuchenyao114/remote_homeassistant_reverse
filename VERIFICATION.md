@@ -221,3 +221,44 @@ ALL TESTS PASSED
 | 连续重启期间的日志 | 通过：无 `ValueError`、无 `Traceback`；只有正常的 `agent b disconnected, mirrored states removed` |
 | 界面条目状态 | 通过：`Hub · agent b` = `loaded` |
 | CI（commit 76ad938） | hassfest ✅ / HACS ✅ / integration tests ✅ |
+
+---
+
+# 第五轮：v1.1.3 心跳断线竞态
+
+真机日志出现一次：
+
+```
+File "/config/custom_components/remote_push/agent.py", line 175, in _session
+    async for msg in ws:
+...
+File "/usr/local/lib/python3.14/site-packages/aiohttp/client_ws.py", line 471, in receive
+    await self.pong(msg.data)
+...
+aiohttp.client_exceptions.ClientConnectionResetError: Cannot write to closing transport
+```
+
+| 现象 | 原因 | 修复 |
+| --- | --- | --- |
+| Agent 收到 Hub 的 PING 时连接已经在关闭，aiohttp 自动回 PONG 失败，异常冒泡到 `_run` 被 `_LOGGER.exception` 打成 ERROR traceback | aiohttp 3.13/3.14 的 `ClientWebSocketResponse.receive()` 处理 PING 时会同步调用 `pong()`；对端已发 CLOSE、传输层正在关闭时写帧抛 `ClientConnectionResetError`。这属于正常断线竞态，不是同步逻辑错误 | `_run` 对 `ClientConnectionResetError` / `ConnectionResetError` 走 debug 日志，对其他 `OSError`（例如连接被拒、DNS 失败）走 warning 日志，只有真正未知异常才保留完整 traceback；`_close_ws` 统一吞掉关闭竞态的 `OSError` |
+
+行为不变：异常后仍按 `RECONNECT_DELAY` 重连，Hub 侧镜像状态照常清理并重建。
+
+测试补充（`tests/test_remote_push.py`）：
+
+- 用一个 `close()` 抛 `ClientConnectionResetError` 的假 WebSocket 验证 `_close_ws` 不抛错
+- 用一次性 `_session()` 抛同类异常的探针验证 `_run()` 不抛错且会重试第二次
+
+本地结果：
+
+```
+PASS  heartbeat close race handled without error
+PASS  initial state push + prefix + filters
+PASS  incremental state_changed push
+PASS  service call forwarding + result event
+PASS  entity-level service interception
+PASS  disconnect cleanup
+ALL TESTS PASSED
+```
+
+版本：`1.1.2 → 1.1.3`。
