@@ -31,6 +31,8 @@ helpers = types.ModuleType("homeassistant.helpers")
 cv_mod = types.ModuleType("homeassistant.helpers.config_validation")
 aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
 typing_mod = types.ModuleType("homeassistant.helpers.typing")
+dr_mod = types.ModuleType("homeassistant.helpers.device_registry")
+er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
 
 EVENT_CALL_SERVICE = "call_service"
 EVENT_STATE_CHANGED = "state_changed"
@@ -131,6 +133,76 @@ def async_get_clientsession(hass, verify_ssl=True):
 aiohttp_client.async_get_clientsession = async_get_clientsession
 typing_mod.ConfigType = dict
 
+
+class FakeDevice:
+    def __init__(self, device_id, identifiers, name):
+        self.id = device_id
+        self.identifiers = identifiers
+        self.name = name
+
+
+class FakeDeviceRegistry:
+    def __init__(self):
+        self.devices = {}
+        self._counter = 0
+
+    def async_get_or_create(self, *, config_entry_id, identifiers, name, **kwargs):
+        for device in self.devices.values():
+            if device.identifiers == identifiers:
+                return device
+        self._counter += 1
+        device = FakeDevice(f"dev_{self._counter}", set(identifiers), name)
+        self.devices[device.id] = device
+        return device
+
+    def async_remove_device(self, device_id):
+        self.devices.pop(device_id, None)
+
+
+class FakeEntityEntry:
+    def __init__(self, entity_id, unique_id, platform, device_id, original_name):
+        self.entity_id = entity_id
+        self.unique_id = unique_id
+        self.platform = platform
+        self.device_id = device_id
+        self.original_name = original_name
+
+
+class FakeEntityRegistry:
+    def __init__(self, hass):
+        self.hass = hass
+        self.entities = {}
+
+    def async_get_or_create(
+        self, domain, platform, unique_id, *, device_id=None, suggested_object_id=None,
+        config_entry=None, original_name=None
+    ):
+        # Mirror real HA: config_entry must be a ConfigEntry object or None;
+        # a stray config_entry_id keyword must fail loudly, not be swallowed.
+        assert config_entry is None or hasattr(config_entry, "entry_id"), (
+            "config_entry must be a ConfigEntry object"
+        )
+        for entry in self.entities.values():
+            if entry.platform == platform and entry.unique_id == unique_id:
+                return entry
+        entity_id = f"{domain}.{suggested_object_id or unique_id}"
+        entry = FakeEntityEntry(entity_id, unique_id, platform, device_id, original_name)
+        self.entities[entity_id] = entry
+        return entry
+
+    def async_get_entity_id(self, domain, platform, unique_id):
+        for entry in self.entities.values():
+            if entry.platform == platform and entry.unique_id == unique_id:
+                return entry.entity_id
+        return None
+
+    def async_remove(self, entity_id):
+        self.entities.pop(entity_id, None)
+
+
+dr_mod.async_get = lambda hass: hass.device_registry
+er_mod.async_get = lambda hass: hass.entity_registry
+
 sys.modules.update(
     {
         "homeassistant": ha,
@@ -142,6 +214,8 @@ sys.modules.update(
         "homeassistant.helpers.config_validation": cv_mod,
         "homeassistant.helpers.aiohttp_client": aiohttp_client,
         "homeassistant.helpers.typing": typing_mod,
+        "homeassistant.helpers.device_registry": dr_mod,
+        "homeassistant.helpers.entity_registry": er_mod,
     }
 )
 ha.components = components
@@ -149,6 +223,8 @@ components.websocket_api = websocket_api
 helpers.config_validation = cv_mod
 helpers.aiohttp_client = aiohttp_client
 helpers.typing = typing_mod
+helpers.device_registry = dr_mod
+helpers.entity_registry = er_mod
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +333,8 @@ class FakeHass:
         self.bus = FakeBus(self)
         self.states = FakeStates(self)
         self.services = FakeServices(self)
+        self.device_registry = FakeDeviceRegistry()
+        self.entity_registry = FakeEntityRegistry(self)
 
 
 class FakeCall:
@@ -421,6 +499,18 @@ async def main() -> None:
     assert hub_hass.states.entities["sensor.b_temp"].state == "23"
     assert hub_hass.states.entities["sensor.b_temp"].attributes["friendly_name"] == "[b] Temp"
     print("PASS  initial state push + prefix + filters")
+
+    # Mirrored entities must be registered in the device/entity registries so
+    # they show up under Settings -> Devices & services on the hub.
+    assert hub_hass.device_registry.devices, "no device registered for agent"
+    device = next(iter(hub_hass.device_registry.devices.values()))
+    assert ("remote_push", "b") in device.identifiers
+    reg_entries = list(hub_hass.entity_registry.entities.values())
+    assert any(
+        e.entity_id == "sensor.b_temp" and e.device_id == device.id
+        for e in reg_entries
+    ), "mirrored entity not attached to the agent device"
+    print("PASS  device + entity registry registration")
 
     agent_hass.states.async_set("sensor.temp", "24", {"friendly_name": "Temp"})
     assert await wait_for(

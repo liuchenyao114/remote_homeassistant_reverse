@@ -12,6 +12,8 @@ from homeassistant.components import websocket_api
 from homeassistant.const import EVENT_CALL_SERVICE
 from homeassistant.core import HomeAssistant, Event, callback, split_entity_id
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_AGENT_ID,
@@ -59,6 +61,8 @@ class PushHub:
         self.agents: dict[str, dict[str, Any]] = {}
         self.connections: dict[str, Any] = {}
         self.entity_map: dict[str, str] = {}
+        # local mirrored entity_id -> the original entity_id on the agent
+        self.entity_original: dict[str, str] = {}
         self._ids = itertools.count(1)
         self._unsub_bus: Any = None
         self._started = False
@@ -66,10 +70,14 @@ class PushHub:
         for conf in agents_conf or []:
             self.add_agent(conf)
 
-    def add_agent(self, conf: dict[str, Any]) -> dict[str, Any]:
+    def add_agent(
+        self, conf: dict[str, Any], config_entry_id: str | None = None
+    ) -> dict[str, Any]:
         """Register or update one agent, both from YAML and config entries."""
         agent_id = str(conf[CONF_AGENT_ID]).lower()
         entry = {
+            "config_entry_id": config_entry_id or f"{DOMAIN}.yaml.{agent_id}",
+            "device_id": None,
             "secret": conf[CONF_SECRET],
             "prefix": conf.get(CONF_PREFIX) or f"{agent_id}_",
             "include_domains": set(conf.get(CONF_INCLUDE_DOMAINS) or []),
@@ -85,14 +93,17 @@ class PushHub:
         return entry
 
     async def async_remove_agent(self, agent_id: str) -> None:
-        """Forget an agent and drop its mirrored states."""
+        """Forget an agent and drop its mirrored states, entities and device."""
         agent_id = str(agent_id).lower()
         self.agents.pop(agent_id, None)
         connection = self.connections.pop(agent_id, None)
         for entity_id, owner in list(self.entity_map.items()):
             if owner == agent_id:
+                self._unregister_entity(entity_id)
                 self.hass.states.async_remove(entity_id)
                 self.entity_map.pop(entity_id, None)
+                self.entity_original.pop(entity_id, None)
+        self._remove_device(agent_id)
         if connection is not None:
             _LOGGER.info("agent %s removed, connection kept until it drops", agent_id)
         _LOGGER.info("agent %s removed, mirrored states cleared", agent_id)
@@ -158,8 +169,11 @@ class PushHub:
         self.connections.pop(agent_id, None)
         for entity_id, owner in list(self.entity_map.items()):
             if owner == agent_id:
+                # Keep entity registry entries + device so the UI shows the
+                # entities as unavailable instead of removing them entirely.
                 self.hass.states.async_remove(entity_id)
                 self.entity_map.pop(entity_id, None)
+                self.entity_original.pop(entity_id, None)
         _LOGGER.warning("agent %s disconnected, mirrored states removed", agent_id)
 
     @staticmethod
@@ -180,14 +194,92 @@ class PushHub:
         return f"{domain}.{object_id}"
 
     def _original_entity_id(self, agent_id: str, local_entity_id: str) -> str:
+        original = self.entity_original.get(local_entity_id.lower())
+        if original:
+            return original
         domain, object_id = split_entity_id(local_entity_id)
         prefix = self.agents[agent_id]["prefix"]
         if prefix and object_id.startswith(prefix):
             object_id = object_id[len(prefix) :]
         return f"{domain}.{object_id}"
 
+    def _ensure_device(self, agent_id: str) -> str | None:
+        """Create (once) a device representing this agent on the hub."""
+        conf = self.agents.get(agent_id)
+        if conf is None:
+            return None
+        if conf.get("device_id"):
+            return conf["device_id"]
+        try:
+            registry = dr.async_get(self.hass)
+            device = registry.async_get_or_create(
+                config_entry_id=conf["config_entry_id"],
+                identifiers={(DOMAIN, agent_id)},
+                name=f"Remote Push · agent {agent_id}",
+                manufacturer="Remote Push",
+                model="Remote Agent",
+            )
+        except Exception as err:  # noqa: BLE001 - registries may be unavailable in tests
+            _LOGGER.debug("could not register device for %s: %s", agent_id, err)
+            return None
+        conf["device_id"] = device.id
+        _LOGGER.debug("registered device %s for agent %s", device.id, agent_id)
+        return device.id
+
+    def _remove_device(self, agent_id: str) -> None:
+        """Delete the agent device once no mirrored entities remain."""
+        conf = self.agents.get(agent_id)
+        device_id = conf.get("device_id") if conf else None
+        if not device_id:
+            return
+        try:
+            registry = dr.async_get(self.hass)
+            registry.async_remove_device(device_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("could not remove device for %s: %s", agent_id, err)
+        if conf is not None:
+            conf["device_id"] = None
+
+    def _register_entity(
+        self, agent_id: str, local_id: str, original_id: str, attributes: dict[str, Any]
+    ) -> None:
+        """Put a mirrored entity into the entity registry, attached to the device."""
+        device_id = self._ensure_device(agent_id)
+        if not device_id:
+            return
+        domain, _ = split_entity_id(local_id)
+        try:
+            registry = er.async_get(self.hass)
+            registry.async_get_or_create(
+                domain,
+                DOMAIN,
+                f"{agent_id}::{original_id.lower()}",
+                device_id=device_id,
+                suggested_object_id=local_id.split(".", 1)[1],
+                original_name=attributes.get("friendly_name"),
+            )
+        except Exception as err:  # noqa: BLE001 - registries may be unavailable in tests
+            _LOGGER.debug("could not register entity %s: %s", local_id, err)
+
+    def _unregister_entity(self, local_id: str) -> None:
+        """Remove the entity registry entry for a mirrored entity."""
+        try:
+            registry = er.async_get(self.hass)
+            entry = registry.async_get_entity_id(*self._registry_key(local_id))
+            if entry:
+                registry.async_remove(entry)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("could not unregister entity %s: %s", local_id, err)
+
+    def _registry_key(self, local_id: str) -> tuple[str, str, str]:
+        """Return (domain, platform, unique_id) for a mirrored entity."""
+        agent_id = self.entity_map.get(local_id.lower(), "")
+        original = self.entity_original.get(local_id.lower(), local_id)
+        domain, _ = split_entity_id(local_id)
+        return domain, DOMAIN, f"{agent_id}::{original.lower()}"
+
     def apply_state(self, agent_id: str, state_data: dict[str, Any]) -> None:
-        """Write one pushed state into the local state machine."""
+        """Write one pushed state into the state machine and the registries."""
         conf = self.agents.get(agent_id)
         entity_id = state_data.get("entity_id")
         if conf is None or not entity_id or not self._wanted(conf, entity_id):
@@ -202,14 +294,18 @@ class PushHub:
             attributes["friendly_name"] = marker + str(friendly_name)
 
         self.entity_map[local_id.lower()] = agent_id
+        self.entity_original[local_id.lower()] = str(entity_id).lower()
+        self._register_entity(agent_id, local_id, str(entity_id), attributes)
         self.hass.states.async_set(
             local_id, state_data.get("state", "unknown"), attributes
         )
 
     def remove_state(self, agent_id: str, entity_id: str) -> None:
         local_id = self._local_entity_id(agent_id, entity_id)
+        self._unregister_entity(local_id)
         self.hass.states.async_remove(local_id)
         self.entity_map.pop(local_id.lower(), None)
+        self.entity_original.pop(local_id.lower(), None)
 
     async def send_to_agent(self, agent_id: str, payload: dict[str, Any]) -> bool:
         connection = self.connections.get(agent_id)

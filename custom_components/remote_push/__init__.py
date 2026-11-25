@@ -153,7 +153,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if role == ROLE_HUB:
         hub = _ensure_hub(hass)
-        hub.add_agent(data)
+        hub.add_agent(data, config_entry_id=entry.entry_id)
         await hub.async_start()
         entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
         _LOGGER.info(

@@ -262,3 +262,38 @@ ALL TESTS PASSED
 ```
 
 版本：`1.1.2 → 1.1.3`。
+
+---
+
+# 第六轮：v1.2.0 设备与实体注册表
+
+用户反馈：A 侧只看到镜像实体、看不到设备。定位到 Hub 只调用 `hass.states.async_set()` 写状态机，从未登记设备注册表和实体注册表。
+
+对照原版 `custom-components/remote_homeassistant` 的做法：连接时建一个代表远程 HA 的设备，镜像实体进实体注册表；但原版镜像实体没有 `device_id`，因此点开设备看不到镜像实体。v1.2.0 做得更彻底——镜像实体也关联到 agent 设备。
+
+| 改动 | 实现 |
+| --- | --- |
+| 每个 agent 建设备 | `device_registry.async_get_or_create`，标识 `(remote_push, agent_id)`，`config_entry_id` 取条目 `entry_id`，YAML 配置用 `remote_push.yaml.<agent_id>` |
+| 镜像实体注册 | `entity_registry.async_get_or_create(domain, DOMAIN, "<agent>::<原始实体ID>")`，带 `device_id`、`suggested_object_id`、`original_name` |
+| 服务转发还原 ID | 新增 `entity_original` 映射，优先用它把镜像 ID 还原成 B 侧真实 ID，去掉前缀仅作为兜底 |
+| 断线 | 移除镜像状态，但保留设备与实体注册项，UI 显示为不可用；重连后原样恢复 |
+| 删除 agent | 注销实体并删除设备 |
+
+真机 API 签名核对（HA 2026.11）：
+
+- `device_registry.async_get_or_create` 的 `config_entry_id` 必填且必须是真实存在的条目，否则抛 `HomeAssistantError`——因此 YAML 场景无法建设备（无对应 config entry），自动降级为只写状态机，功能不受影响。
+- `entity_registry.async_get_or_create` 只接受 `config_entry` 对象、不接受 `config_entry_id`；代码传位置参数 + `device_id`，与真机签名一致。测试桩已收紧为同样签名，避免再次掩盖参数错误。
+
+本地结果：
+
+```
+PASS  initial state push + prefix + filters
+PASS  device + entity registry registration
+PASS  incremental state_changed push
+PASS  service call forwarding + result event
+PASS  entity-level service interception
+PASS  disconnect cleanup
+ALL TESTS PASSED
+```
+
+版本：`1.1.3 → 1.2.0`。
